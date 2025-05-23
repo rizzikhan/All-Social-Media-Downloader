@@ -1,0 +1,704 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Download videos from YouTube, Instagram, Facebook and 30+ platforms. Fast, free, and easy to use.">
+    <meta name="theme-color" content="#4f46e5">
+    <title>VideoFetch - Download Videos from 30+ platforms</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#4f46e5',
+                        secondary: '#0ea5e9',
+                        darkblue: '#1e3a8a',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        warning: '#f59e0b',
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .bg-gradient {
+                background: linear-gradient(135deg, #4f46e5 0%, #0ea5e9 100%);
+            }
+            .text-gradient {
+                background-clip: text;
+                -webkit-background-clip: text;
+                color: transparent;
+                background-image: linear-gradient(135deg, #4f46e5 0%, #0ea5e9 100%);
+            }
+            .pulse {
+                animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            }
+            @keyframes pulse {
+                0%, 100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: .7;
+                }
+            }
+            .shimmer {
+                background: linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0) 0%,
+                    rgba(255, 255, 255, 0.2) 50%,
+                    rgba(255, 255, 255, 0) 100%
+                );
+                background-size: 200% 100%;
+                animation: shimmer 1.5s infinite;
+            }
+            @keyframes shimmer {
+                0% {
+                    background-position: -200% 0;
+                }
+                100% {
+                    background-position: 200% 0;
+                }
+            }
+            /* Improve tap targets for mobile */
+            .mobile-tap-target {
+                min-height: 44px;
+                min-width: 44px;
+            }
+            /* Fix for aspect ratio on older browsers */
+            .aspect-video {
+                position: relative;
+                padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+                height: 0;
+                overflow: hidden;
+            }
+            .aspect-video img {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center">
+                    <a href="/" class="flex items-center">
+                        <i class="fas fa-download text-primary text-2xl mr-2"></i>
+                        <h1 class="text-xl sm:text-2xl font-bold text-gradient">VideoFetch</h1>
+                    </a>
+                </div>
+                <nav class="flex space-x-4">
+                    <a href="#supported" class="text-gray-600 hover:text-primary transition px-3 py-2 rounded-md text-sm font-medium mobile-tap-target">Supported Sites</a>
+                    <a href="#features" class="text-gray-600 hover:text-primary transition px-3 py-2 rounded-md text-sm font-medium mobile-tap-target hidden sm:block">Features</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <!-- Hero Section -->
+            <div class="px-6 py-8 sm:p-10 bg-gradient">
+                <div class="max-w-3xl mx-auto text-center">
+                    <h2 class="text-2xl sm:text-3xl font-extrabold text-white sm:text-4xl">
+                        Download Videos from Any Platform
+                    </h2>
+                    <p class="mt-3 text-lg sm:text-xl text-white opacity-90">
+                        YouTube, Instagram, Facebook, Twitter, TikTok and 25+ more sites
+                    </p>
+                </div>
+            </div>
+
+            <!-- Form Section -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 border-b border-gray-200">
+                {% if error_message %}
+                <div class="mb-6 bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-exclamation-circle text-red-400"></i>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-red-700">
+                                {{ error_message }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <form method="POST" id="download-form" class="space-y-4 sm:space-y-6">
+                    {% csrf_token %}
+                    <div>
+                        <label for="url" class="block text-sm font-medium text-gray-700">Enter Video URL</label>
+                        <div class="mt-1 flex flex-col sm:flex-row gap-2 sm:gap-0">
+                            <input type="url" name="url" id="url" 
+                                class="focus:ring-primary focus:border-primary flex-grow block w-full rounded-md sm:rounded-r-none sm:text-sm border-gray-300 p-4 border mobile-tap-target" 
+                                placeholder="https://www.youtube.com/watch?v=..." 
+                                value="{{ url|default:'' }}" 
+                                required
+                                autocomplete="url">
+                            <button type="submit" 
+                                class="mobile-tap-target flex justify-center items-center py-3 px-4 border border-transparent rounded-md sm:rounded-l-none shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-colors">
+                                <i class="fas fa-search mr-2"></i>
+                                <span>Get Download Options</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <div id="loading" class="hidden mt-6 text-center">
+                    <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm text-white transition ease-in-out duration-150 bg-primary rounded-md shadow cursor-not-allowed">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing your request...
+                    </div>
+                    <p class="mt-2 text-sm text-gray-500">This may take a moment depending on the video length and platform.</p>
+                </div>
+            </div>
+
+            {% if video_info %}
+            <!-- Video Preview Section -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 bg-gray-50 border-b border-gray-200">
+                <div class="flex flex-col md:flex-row gap-4 md:gap-6">
+                    <!-- Thumbnail -->
+                    <div class="md:w-1/3">
+                        <div class="aspect-video rounded-lg overflow-hidden shadow-md">
+                            <img src="{{ video_info.thumbnail }}" alt="{{ video_info.title }}" class="object-cover w-full h-full">
+                        </div>
+                    </div>
+                    
+                    <!-- Info -->
+                    <div class="md:w-2/3">
+                        <h3 class="text-lg sm:text-xl font-bold text-gray-900 line-clamp-2">{{ video_info.title }}</h3>
+                        
+                        <div class="mt-2 flex flex-wrap items-center text-sm text-gray-500 gap-2">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                <i class="fas fa-{{ video_info.platform|lower }} mr-1"></i>
+                                {{ video_info.platform }}
+                            </span>
+                            
+                            {% if video_info.duration %}
+                            <span class="flex items-center">
+                                <i class="far fa-clock mr-1"></i>
+                                {{ video_info.duration }}
+                            </span>
+                            {% endif %}
+                            
+                            {% if video_info.upload_date %}
+                            <span class="flex items-center">
+                                <i class="far fa-calendar-alt mr-1"></i>
+                                {{ video_info.upload_date }}
+                            </span>
+                            {% endif %}
+                        </div>
+                        
+                        {% if video_info.uploader %}
+                        <div class="mt-3 flex items-center">
+                            <span class="inline-block h-8 w-8 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center">
+                                <i class="fas fa-user text-gray-500"></i>
+                            </span>
+                            <span class="ml-2 text-sm font-medium text-gray-700">{{ video_info.uploader }}</span>
+                        </div>
+                        {% endif %}
+                        
+                        {% if video_info.description %}
+                        <div class="mt-3">
+                            <p class="text-sm text-gray-600 line-clamp-3">{{ video_info.description }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if formats %}
+            <!-- Video Formats Section - Desktop -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 hidden md:block">
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-3">Video Formats</h3>
+                <div class="mt-4 flex flex-col">
+                    <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+                        <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+                            <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quality</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Format</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resolution</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        {% for format in formats %}
+                                        <tr>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm font-medium text-gray-900">{{ format.quality|default:'Unknown' }}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-gray-500">{{ format.ext }}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-gray-500">{% if format.width and format.height %}{{ format.width }}x{{ format.height }}{% else %}N/A{% endif %}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-gray-500">{% if format.filesize %}{{ format.filesize|filesizeformat }}{% else %}Unknown{% endif %}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <form method="POST" action="">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="url" value="{{ url }}">
+                                                    <input type="hidden" name="quality" value="{{ format.format_id }}">
+                                                    <button type="submit" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-success hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-success transition-colors mobile-tap-target">
+                                                        <i class="fas fa-download mr-2"></i>
+                                                        Download
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video Formats Section - Mobile -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 md:hidden">
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-3">Video Formats</h3>
+                <div class="mt-4 grid grid-cols-1 gap-4">
+                    {% for format in formats %}
+                    <div class="p-4 border rounded bg-white shadow-sm">
+                        <div class="flex justify-between items-start flex-col sm:flex-row gap-3">
+                            <div>
+                                <p class="font-medium">{{ format.quality|default:'Unknown' }}</p>
+                                <p class="text-sm text-gray-500">{{ format.ext }} | {% if format.width and format.height %}{{ format.width }}x{{ format.height }}{% else %}N/A{% endif %}</p>
+                                <p class="text-sm text-gray-500">{% if format.filesize %}{{ format.filesize|filesizeformat }}{% else %}Size unknown{% endif %}</p>
+                            </div>
+                            <form method="POST" action="" class="w-full sm:w-auto">
+                                {% csrf_token %}
+                                <input type="hidden" name="url" value="{{ url }}">
+                                <input type="hidden" name="quality" value="{{ format.format_id }}">
+                                <button type="submit" class="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-success hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-success transition-colors mobile-tap-target">
+                                    <i class="fas fa-download mr-2"></i>
+                                    Download
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if audio_formats %}
+            <!-- Audio Formats Section - Desktop -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 bg-gray-50 hidden md:block">
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-3">Audio Only</h3>
+                <div class="mt-4 flex flex-col">
+                    <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+                        <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+                            <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quality</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Format</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        {% for format in audio_formats %}
+                                        <tr>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm font-medium text-gray-900">{{ format.quality|default:'Unknown' }}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-gray-500">{{ format.ext }}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="text-sm text-gray-500">{% if format.filesize %}{{ format.filesize|filesizeformat }}{% else %}Unknown{% endif %}</div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <form method="POST" action="">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="url" value="{{ url }}">
+                                                    <input type="hidden" name="quality" value="{{ format.format_id }}">
+                                                    <button type="submit" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-secondary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition-colors mobile-tap-target">
+                                                        <i class="fas fa-music mr-2"></i>
+                                                        Extract Audio
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audio Formats Section - Mobile -->
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 bg-gray-50 md:hidden">
+                <h3 class="text-lg font-medium text-gray-900 border-b pb-3">Audio Only</h3>
+                <div class="mt-4 grid grid-cols-1 gap-4">
+                    {% for format in audio_formats %}
+                    <div class="p-4 border rounded bg-white shadow-sm">
+                        <div class="flex justify-between items-start flex-col sm:flex-row gap-3">
+                            <div>
+                                <p class="font-medium">{{ format.quality|default:'Unknown' }}</p>
+                                <p class="text-sm text-gray-500">{{ format.ext }}</p>
+                                <p class="text-sm text-gray-500">{% if format.filesize %}{{ format.filesize|filesizeformat }}{% else %}Size unknown{% endif %}</p>
+                            </div>
+                            <form method="POST" action="" class="w-full sm:w-auto">
+                                {% csrf_token %}
+                                <input type="hidden" name="url" value="{{ url }}">
+                                <input type="hidden" name="quality" value="{{ format.format_id }}">
+                                <button type="submit" class="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-secondary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition-colors mobile-tap-target">
+                                    <i class="fas fa-music mr-2"></i>
+                                    Extract Audio
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Supported Platforms Section -->
+        <div id="supported" class="mt-8 sm:mt-12 bg-white shadow rounded-lg overflow-hidden">
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10 border-b border-gray-200">
+                <h2 class="text-xl sm:text-2xl font-bold text-gray-900">Supported Platforms</h2>
+                <p class="mt-2 text-sm text-gray-600">VideoFetch supports downloading from 30+ video platforms:</p>
+                
+                <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                    {% for platform in platforms %}
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fab fa-{{ platform.icon }} text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">{{ platform.name }}</span>
+                    </div>
+                    {% endfor %}
+                    
+                    <!-- Additional platforms not in the icon list -->
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-tv text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Vevo</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-graduation-cap text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Khan Academy</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-film text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Rutube</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-photo-video text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Bilibili</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-play text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Niconico</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-video text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Youku</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-images text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Flickr</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-comment-alt text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">Snapchat</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-newspaper text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">News Sites</span>
+                    </div>
+                    <div class="flex items-center p-3 bg-gray-50 rounded-lg shadow-sm">
+                        <i class="fas fa-plus-circle text-xl text-gray-700 mr-3"></i>
+                        <span class="text-sm font-medium text-gray-900 truncate">And Many More!</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Section -->
+        <div id="features" class="mt-8 sm:mt-12 bg-white shadow rounded-lg overflow-hidden">
+            <div class="px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+                <h2 class="text-xl sm:text-2xl font-bold text-gray-900 mb-6">Key Features</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+                    <div class="p-4 sm:p-6 bg-gray-50 rounded-lg shadow-sm">
+                        <div class="text-center">
+                            <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-primary text-white mb-4">
+                                <i class="fas fa-globe"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-900 mb-2">Multi-Platform Support</h3>
+                            <p class="text-sm text-gray-600">Download videos from YouTube, Instagram, Facebook, Twitter, TikTok, and many more platforms.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="p-4 sm:p-6 bg-gray-50 rounded-lg shadow-sm">
+                        <div class="text-center">
+                            <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-success text-white mb-4">
+                                <i class="fas fa-cog"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-900 mb-2">Format Selection</h3>
+                            <p class="text-sm text-gray-600">Choose from multiple video qualities and formats to get exactly what you need.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="p-4 sm:p-6 bg-gray-50 rounded-lg shadow-sm">
+                        <div class="text-center">
+                            <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-secondary text-white mb-4">
+                                <i class="fas fa-music"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-900 mb-2">Audio Extraction</h3>
+                            <p class="text-sm text-gray-600">Extract audio from videos in high quality formats for music and podcasts.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Install App Prompt - Mobile Only -->
+        <div class="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-4 flex items-center justify-between z-20 sm:hidden hidden" id="pwa-install-prompt">
+            <div class="flex items-center">
+                <i class="fas fa-arrow-down-to-bracket text-primary text-xl mr-3"></i>
+                <div><span class="text-sm font-medium">Add VideoFetch to Home Screen</span>
+                </div>
+            </div>
+            <button id="pwa-install-button" class="bg-primary text-white px-4 py-2 rounded-md text-sm font-medium mobile-tap-target">
+                Install
+            </button>
+            <button id="pwa-dismiss-button" class="text-gray-400 ml-2 mobile-tap-target">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    </main>
+
+    <footer class="bg-white mt-8 sm:mt-12 border-t border-gray-200">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div class="text-center">
+                <p class="text-sm text-gray-500">
+                    &copy; 2025 VideoFetch. All rights reserved. This service is for personal use only.
+                </p>
+                <p class="text-xs text-gray-400 mt-2">
+                    VideoFetch respects copyright laws. Please only download content you have the right to access.
+                </p>
+                <!-- Mobile app links -->
+                <div class="flex justify-center mt-4 space-x-4">
+                    <a href="#" class="text-gray-500 hover:text-primary">
+                        <span class="sr-only">Privacy Policy</span>
+                        <i class="fas fa-shield-alt"></i>
+                    </a>
+                    <a href="#" class="text-gray-500 hover:text-primary">
+                        <span class="sr-only">Terms of Service</span>
+                        <i class="fas fa-file-contract"></i>
+                    </a>
+                    <a href="#" class="text-gray-500 hover:text-primary">
+                        <span class="sr-only">Contact</span>
+                        <i class="fas fa-envelope"></i>
+                    </a>
+                    <button id="share-button" class="text-gray-500 hover:text-primary sm:hidden">
+                        <span class="sr-only">Share</span>
+                        <i class="fas fa-share-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Toast notifications container -->
+    <div id="toast-container" class="fixed bottom-16 sm:bottom-4 right-4 z-50"></div>
+
+    <script>
+        // Show loading indicator when form is submitted
+        document.getElementById('download-form').addEventListener('submit', function() {
+            document.getElementById('loading').style.display = 'block';
+        });
+
+        // Mobile Web Share API
+        if (navigator.share) {
+            document.getElementById('share-button').addEventListener('click', async () => {
+                try {
+                    await navigator.share({
+                        title: 'VideoFetch - Download Videos from 30+ platforms',
+                        text: 'Check out VideoFetch, a free tool to download videos from YouTube, Instagram, and more!',
+                        url: window.location.href
+                    });
+                    showToast('Thanks for sharing!', 'success');
+                } catch (err) {
+                    // User cancelled or share failed
+                    console.error('Share failed:', err);
+                }
+            });
+        } else {
+            // Hide share button if Web Share API is not available
+            const shareButton = document.getElementById('share-button');
+            if (shareButton) {
+                shareButton.style.display = 'none';
+            }
+        }
+
+        // PWA Install prompt
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent Chrome 67 and earlier from automatically showing the prompt
+            e.preventDefault();
+            // Stash the event so it can be triggered later
+            deferredPrompt = e;
+            // Show the install prompt
+            document.getElementById('pwa-install-prompt').classList.remove('hidden');
+        });
+
+        // Handle install button click
+        document.getElementById('pwa-install-button').addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            // Show the install prompt
+            deferredPrompt.prompt();
+            // Wait for the user to respond to the prompt
+            const { outcome } = await deferredPrompt.userChoice;
+            // Reset the deferred prompt variable
+            deferredPrompt = null;
+            // Hide the install prompt
+            document.getElementById('pwa-install-prompt').classList.add('hidden');
+            // Log the outcome
+            console.log(`User ${outcome === 'accepted' ? 'accepted' : 'dismissed'} the install prompt`);
+        });
+
+        // Handle dismiss button click
+        document.getElementById('pwa-dismiss-button').addEventListener('click', () => {
+            document.getElementById('pwa-install-prompt').classList.add('hidden');
+        });
+
+        // Toast notification function
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `mb-2 p-3 rounded-md shadow-md flex items-center justify-between max-w-xs transform transition-transform duration-300 ease-in-out translate-x-full ${
+                type === 'success' ? 'bg-green-500 text-white' : 
+                type === 'error' ? 'bg-red-500 text-white' : 
+                'bg-blue-500 text-white'
+            }`;
+            
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    <i class="mr-2 ${
+                        type === 'success' ? 'fas fa-check-circle' : 
+                        type === 'error' ? 'fas fa-exclamation-circle' : 
+                        'fas fa-info-circle'
+                    }"></i>
+                    <span>${message}</span>
+                </div>
+                <button class="ml-4 text-white hover:text-gray-200 focus:outline-none">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            const container = document.getElementById('toast-container');
+            container.appendChild(toast);
+            
+            // Animate entrance
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full');
+            }, 10);
+            
+            // Close button functionality
+            toast.querySelector('button').addEventListener('click', () => {
+                toast.classList.add('translate-x-full');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 300);
+            });
+            
+            // Auto close after 4 seconds
+            setTimeout(() => {
+                if (container.contains(toast)) {
+                    toast.classList.add('translate-x-full');
+                    setTimeout(() => {
+                        if (container.contains(toast)) {
+                            container.removeChild(toast);
+                        }
+                    }, 300);
+                }
+            }, 4000);
+        }
+
+        // Check network status
+        function updateOnlineStatus() {
+            if (navigator.onLine) {
+                // Online
+                document.querySelectorAll('button[type="submit"]').forEach(button => {
+                    button.disabled = false;
+                });
+            } else {
+                // Offline
+                document.querySelectorAll('button[type="submit"]').forEach(button => {
+                    button.disabled = true;
+                });
+                showToast('You are currently offline. Some features may be unavailable.', 'error');
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        
+        // Check initial status
+        updateOnlineStatus();
+
+        // Add appropriate classes for touch devices
+        if ('ontouchstart' in document.documentElement) {
+            document.body.classList.add('touch-device');
+        }
+
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js').then(registration => {
+                    console.log('SW registered: ', registration);
+                }).catch(registrationError => {
+                    console.log('SW registration failed: ', registrationError);
+                });
+            });
+        }
+
+        // Fix aspect ratio for older browsers
+        if (!CSS.supports('aspect-ratio', '16/9')) {
+            const fixAspectRatio = () => {
+                document.querySelectorAll('.aspect-video').forEach(el => {
+                    const width = el.offsetWidth;
+                    el.style.height = `${width * 0.5625}px`; // 9/16 = 0.5625
+                });
+            };
+            
+            window.addEventListener('resize', fixAspectRatio);
+            window.addEventListener('load', fixAspectRatio);
+            fixAspectRatio();
+        }
+    </script>
+</body>
+</html>

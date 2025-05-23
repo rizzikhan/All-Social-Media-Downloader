@@ -1,0 +1,60 @@
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Django Backend
+video_downloader/db.sqlite3
+video_downloader/*.log
+video_downloader/downloads/
+video_downloader/media/
+video_downloader/youtube-dl-master/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/migrations/*.py
+!**/migrations/__init__.py
+
+# Frontend (React/Node.js)
+video-grab-central-main/node_modules/
+video-grab-central-main/dist/
+video-grab-central-main/build/
+video-grab-central-main/.env
+video-grab-central-main/.env.local
+video-grab-central-main/.env.production
+
+# Large media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.zip
+*.tar.gz
+*.pdf
+*.dmg
+
+# OS and Editor files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Lock files (optional - you might want to keep package-lock.json)
+# package-lock.json
+# yarn.lock
+bun.lockb
