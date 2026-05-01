@@ -59,6 +59,26 @@ COMPRESSION_BITRATES = {
     "High": "2500k",
 }
 
+# Common yt-dlp options applied to every extraction / download call.
+# Includes a browser-like User-Agent and TikTok extractor args to avoid
+# "Unable to extract webpage video data" errors.
+BASE_YDL_OPTS = {
+    'quiet': True,
+    'no_warnings': True,
+    'no_color': True,
+    'noplaylist': True,
+    'http_headers': {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/124.0.0.0 Safari/537.36'
+        ),
+    },
+    'extractor_args': {
+        'tiktok': {'app_name': ['trill'], 'app_version': ['34.1.2']},
+    },
+}
+
 class DownloadProgressTracker:
     """Track download progress for yt-dlp."""
     
@@ -144,8 +164,10 @@ class DownloadProgressTracker:
                 self.progress = 100.0
                 self.speed = "Done"
                 self.eta = "0:00"
-                self.status = 'ready'
-                logger.info(f"Download marked as ready: {self.filename}")
+                # Don't set 'ready' here — postprocessors (FFmpeg) may still be running.
+                # _download_video() sets status='ready' after everything completes.
+                self.status = 'processing'
+                logger.info(f"yt-dlp download finished (postprocessing may continue): {self.filename}")
             
             elif d['status'] == 'error':
                 error_msg = d.get('error', 'Unknown error')
@@ -211,51 +233,107 @@ def get_unique_filename(title, ext):
     unique_id = str(uuid.uuid4())[:8]
     return f"{safe_title}_{timestamp}_{unique_id}.{ext}"
 
-def _download_video(url, format_id, download_id, compression_level="None"):
+def _download_video(url, format_id, download_id, compression_level="None", video_title=None, is_audio=False):
     """Internal function to download and optionally compress video."""
-    logger.info(f"Starting download for ID {download_id} with format {format_id}, compression: {compression_level}")
-    original_full_path = None # Keep track of the original file path
-    compressed_full_path = None # Keep track of the compressed file path
-    
+    logger.info(f"Starting download for ID {download_id} with format {format_id}, compression: {compression_level}, audio: {is_audio}")
+    original_full_path = None
+    compressed_full_path = None
+
     try:
         download_dir = os.path.join(settings.BASE_DIR, 'downloads')
         os.makedirs(download_dir, exist_ok=True)
-        logger.info(f"Download directory: {download_dir}")
 
-        # Create a progress tracker instance
         tracker = DownloadProgressTracker(download_id)
-        # Set initial status to indicate processing might include download and compression
-        tracker.status = 'processing' # Or a specific status like 'downloading'
-        logger.info(f"Created progress tracker for download {download_id}")
+        tracker.status = 'processing'
 
-        # First get video info to generate unique filename
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            logger.info(f"Extracting info for URL: {url}")
-            info = ydl.extract_info(url, download=False)
-            video_title = info.get('title', 'video')
-            video_ext = 'mp4'  # We'll always use MP4
-            logger.info(f"Got video info - Title: {video_title}")
-            
-            # Generate unique filename for the original download
-            original_filename = get_unique_filename(video_title, video_ext)
-            original_full_path = os.path.join(download_dir, original_filename)
-            logger.info(f"Generated unique filename for original: {original_filename}")
+        # Determine file extension
+        video_ext = 'mp3' if is_audio else 'mp4'
 
-        # Configure yt-dlp options with simpler format selection
-        ydl_opts = {
-            'format': format_id,  # Use the format ID directly
-            'outtmpl': original_full_path,
-            'progress_hooks': [tracker.progress_hook],
-            'quiet': True,
-            'no_warnings': True,
-            'merge_output_format': 'mp4',  # Force MP4 output
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
-            'format_sort': ['res', 'ext:mp4:m4a'],  # Prefer MP4/M4A formats
-            'prefer_ffmpeg': True,  # Use ffmpeg for post-processing
-        }
+        # Use provided title to skip an extra yt-dlp network call
+        if not video_title:
+            with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                video_title = info.get('title', 'video')
+
+        original_filename = get_unique_filename(video_title, video_ext)
+        original_full_path = os.path.join(download_dir, original_filename)
+        logger.info(f"Output file: {original_filename}")
+
+        # Detect FFmpeg location once
+        ffmpeg_path = shutil.which('ffmpeg')
+        ffprobe_path = shutil.which('ffprobe')
+        has_ffmpeg = bool(ffmpeg_path and ffprobe_path)
+        logger.info(f"FFmpeg available: {has_ffmpeg} ({ffmpeg_path})")
+
+        # Build yt-dlp options — audio and video take different paths
+        if is_audio:
+            if has_ffmpeg:
+                # outtmpl uses base_path so yt-dlp downloads e.g. .m4a then FFmpeg converts to .mp3
+                # original_full_path already ends in .mp3 — that will be the final file
+                base_path = os.path.splitext(original_full_path)[0]
+                ydl_opts = {
+                    **BASE_YDL_OPTS,
+                    'format': format_id,
+                    'outtmpl': base_path + '.%(ext)s',
+                    'progress_hooks': [tracker.progress_hook],
+                    'concurrent_fragment_downloads': 4,
+                    'ffmpeg_location': ffmpeg_path,
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'prefer_ffmpeg': True,
+                }
+            else:
+                # No FFmpeg — download native audio format (m4a/webm/opus) directly
+                logger.warning("FFmpeg not found — downloading native audio without MP3 conversion")
+                ydl_opts = {
+                    **BASE_YDL_OPTS,
+                    'format': format_id,
+                    'outtmpl': os.path.splitext(original_full_path)[0] + '.%(ext)s',
+                    'progress_hooks': [tracker.progress_hook],
+                    'concurrent_fragment_downloads': 4,
+                }
+                # We don't know exact ext until download; tracker will use yt-dlp's filename
+        else:
+            if has_ffmpeg:
+                # FFmpeg available: request the chosen format + best audio and let
+                # yt-dlp/FFmpeg merge them.
+                video_format = f"{format_id}+bestaudio/bestvideo+bestaudio/best"
+                base_opts = {
+                    **BASE_YDL_OPTS,
+                    'format': video_format,
+                    'outtmpl': original_full_path,
+                    'progress_hooks': [tracker.progress_hook],
+                    'concurrent_fragment_downloads': 4,
+                    'format_sort': ['res', 'ext:mp4:m4a'],
+                    'ffmpeg_location': ffmpeg_path,
+                    'merge_output_format': 'mp4',
+                    'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
+                    'prefer_ffmpeg': True,
+                }
+            else:
+                # No FFmpeg: cannot merge separate streams, so pick the requested
+                # format only if it already contains audio; otherwise fall back to
+                # the best single-file format that has both video and audio.
+                video_format = (
+                    f"{format_id}[acodec!=none]"
+                    f"/bestvideo[acodec!=none][ext=mp4]"
+                    f"/best[ext=mp4]/best"
+                )
+                logger.warning(
+                    "FFmpeg not found — using combined-format fallback for video download"
+                )
+                base_opts = {
+                    **BASE_YDL_OPTS,
+                    'format': video_format,
+                    'outtmpl': original_full_path,
+                    'progress_hooks': [tracker.progress_hook],
+                    'concurrent_fragment_downloads': 4,
+                    'format_sort': ['res', 'ext:mp4:m4a'],
+                }
+            ydl_opts = base_opts
         logger.info(f"Configured yt-dlp options for format {format_id}")
         
         # Start the actual download
@@ -264,11 +342,16 @@ def _download_video(url, format_id, download_id, compression_level="None"):
             ydl.download([url])
         logger.info("Download completed successfully by yt-dlp")
         
-        # --- Compression Step ---
-        final_filename = original_filename # Assume original is final initially
-        final_full_path = original_full_path
-        
-        if compression_level != "None" and compression_level in COMPRESSION_BITRATES:
+        # --- Compression Step (video only) ---
+        # For audio: use the actual filename captured by progress_hook (yt-dlp's real output file)
+        if is_audio and tracker.filename:
+            final_filename = tracker.filename
+            final_full_path = os.path.join(download_dir, final_filename)
+        else:
+            final_filename = original_filename
+            final_full_path = original_full_path
+
+        if not is_audio and compression_level != "None" and compression_level in COMPRESSION_BITRATES:
             logger.info(f"Compression level selected: {compression_level}")
             tracker.status = 'compressing' # Update status
             tracker.progress = 0 # Reset progress for compression
@@ -361,11 +444,7 @@ def get_platform_from_url(url):
 
 def get_video_info(url):
     """Get detailed video information"""
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'no_color': True,
-    }
+    ydl_opts = dict(BASE_YDL_OPTS)
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -378,7 +457,8 @@ def get_video_info(url):
             duration_seconds = info.get('duration')
             duration = ""
             if duration_seconds:
-                minutes, seconds = divmod(duration_seconds, 60)
+                total_secs = int(duration_seconds)
+                minutes, seconds = divmod(total_secs, 60)
                 hours, minutes = divmod(minutes, 60)
                 if hours > 0:
                     duration = f"{hours}:{minutes:02d}:{seconds:02d}"
@@ -407,11 +487,7 @@ def get_video_info(url):
 
 def get_video_formats(url):
     """Extract video formats using yt-dlp."""
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'no_color': True,
-    }
+    ydl_opts = dict(BASE_YDL_OPTS)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -481,34 +557,106 @@ def download_video(request):
                 return JsonResponse({
                     'error': 'Please provide a valid URL'
                 }, status=400)
-            
-            # Get video info for display
-            video_info = get_video_info(url)
-            if not video_info:
-                return JsonResponse({
-                    'error': 'Could not retrieve video information'
-                }, status=400)
-            
-            # Get available formats
-            formats_dict, video_title = get_video_formats(url)
-            if not formats_dict:
-                return JsonResponse({
-                    'error': f"Could not retrieve video formats: {video_title}"
-                }, status=400)
-            
+
+            # Single yt-dlp extraction — avoids making two separate network calls
+            ydl_opts = dict(BASE_YDL_OPTS)
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+            except Exception as e:
+                return JsonResponse({'error': f'Could not retrieve video information: {str(e)}'}, status=400)
+
+            if not info:
+                return JsonResponse({'error': 'Could not retrieve video information'}, status=400)
+
+            # Build video_info from extracted data
+            duration_seconds = info.get('duration')
+            duration = ""
+            if duration_seconds:
+                total_secs = int(duration_seconds)
+                minutes, seconds = divmod(total_secs, 60)
+                hours, minutes = divmod(minutes, 60)
+                if hours > 0:
+                    duration = f"{hours}:{minutes:02d}:{seconds:02d}"
+                else:
+                    duration = f"{minutes}:{seconds:02d}"
+
+            upload_date = info.get('upload_date', '')
+            if upload_date and len(upload_date) == 8:
+                upload_date = f"{upload_date[0:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+
+            description = info.get('description', '')
+            if description and len(description) > 300:
+                description = description[:300] + '...'
+
+            video_info = {
+                'title': info.get('title'),
+                'uploader': info.get('uploader'),
+                'channel_url': info.get('channel_url'),
+                'duration': duration,
+                'duration_seconds': duration_seconds,
+                'thumbnail': info.get('thumbnail'),
+                'description': description,
+                'view_count': info.get('view_count'),
+                'upload_date': upload_date,
+                'platform': get_platform_from_url(url),
+            }
+
+            # Build slim format dicts — include filesize_approx as fallback so sizes show for more formats
+            def _slim(f, extra=None):
+                filesize = f.get('filesize') or f.get('filesize_approx') or None
+                d = {
+                    'format_id': f.get('format_id'),
+                    'ext': f.get('ext'),
+                    'format_note': f.get('format_note'),
+                    'resolution': f.get('resolution'),
+                    'quality': f.get('quality'),
+                    'filesize': filesize,
+                    'fps': f.get('fps'),
+                    'vcodec': f.get('vcodec'),
+                    'acodec': f.get('acodec'),
+                    'width': f.get('width'),
+                    'height': f.get('height'),
+                    'abr': f.get('abr'),
+                }
+                if extra:
+                    d.update(extra)
+                return d
+
+            video_formats = []
+            audio_formats = []
+            for f in info.get('formats', []):
+                if f.get('vcodec') != 'none':
+                    height = f.get('height')
+                    quality = f"{height}p" if height else None
+                    video_formats.append(_slim(f, {'quality': quality}))
+                elif f.get('acodec') != 'none':
+                    abr = f.get('abr')
+                    try:
+                        abr_value = int(abr) if abr is not None else 0
+                    except (ValueError, TypeError):
+                        abr_value = 0
+                    audio_formats.append(_slim(f, {'quality': f"{abr_value}kbps audio"}))
+
+            video_formats.sort(key=lambda x: (x.get('height', 0) or 0), reverse=True)
+            audio_formats.sort(key=lambda x: (x.get('abr', 0) or 0), reverse=True)
+            video_formats = video_formats[:8]
+            audio_formats = audio_formats[:5]
+
             return JsonResponse({
                 'video_info': video_info,
                 'formats': {
-                    'video': formats_dict.get('video', []),
-                    'audio': formats_dict.get('audio', [])
+                    'video': video_formats,
+                    'audio': audio_formats,
                 },
-                'title': video_title
+                'title': info.get('title', 'video'),
             })
         except Exception as e:
+            logger.exception("Unhandled error in download_video POST handler")
             return JsonResponse({
                 'error': f'Server error: {str(e)}'
             }, status=500)
-    
+
     # For GET requests, return supported platforms
     return JsonResponse({
         'platforms': SUPPORTED_PLATFORMS
@@ -523,16 +671,20 @@ def start_download(request):
         # Get URL, format_id, and compression_level from POST data or JSON body
         url = request.POST.get('url')
         format_id = request.POST.get('format_id')
-        compression_level = request.POST.get('compression_level', 'None') # Default to None
-        
+        compression_level = request.POST.get('compression_level', 'None')
+        video_title = request.POST.get('video_title', '') or ''
+        is_audio = request.POST.get('is_audio', False)
+
         if not url or not format_id:
             # Try to get from JSON body
             try:
                 data = json.loads(request.body)
                 url = url or data.get('url')
                 format_id = format_id or data.get('format_id')
-                compression_level = compression_level or data.get('compression_level', 'None')
-                logger.info(f"Got URL, format, compression from JSON body: {url}, {format_id}, {compression_level}")
+                compression_level = data.get('compression_level', 'None') or 'None'
+                video_title = data.get('video_title', '') or ''
+                is_audio = bool(data.get('is_audio', False))
+                logger.info(f"Parsed from JSON: url={url}, format={format_id}, audio={is_audio}")
             except (json.JSONDecodeError, AttributeError) as e:
                 logger.error(f"Error parsing JSON body: {str(e)}")
 
@@ -545,39 +697,32 @@ def start_download(request):
         # Generate a unique download ID
         download_id = str(uuid.uuid4())
         logger.info(f"Generated download ID: {download_id}")
-        
-        # Get video info to get the title before downloading (needed for tracker)
-        try:
-            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-                info_dict = ydl.extract_info(url, download=False)
-                video_info = {
-                    'title': info_dict.get('title'),
-                    'uploader': info_dict.get('uploader'),
-                    'thumbnail': info_dict.get('thumbnail'),
-                    'platform': get_platform_from_url(url),
-                }
-            logger.info(f"Got video info for {download_id}: {video_info['title']}")
-        except Exception as e:
-            logger.error(f"Error getting video info before download: {str(e)}")
-            return JsonResponse({
-                'error': f"Error getting video info: {str(e)}"
-            }, status=500)
-        
-        # Start the download (and optional compression) in a background thread
-        logger.info(f"Starting download/compression thread for {download_id}")
+
+        # Use title passed from frontend to skip an extra yt-dlp network call
+        # Fall back to fetching if not provided
+        if not video_title:
+            try:
+                with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
+                    info_dict = ydl.extract_info(url, download=False)
+                    video_title = info_dict.get('title', 'video')
+                logger.info(f"Fetched title for {download_id}: {video_title}")
+            except Exception as e:
+                logger.error(f"Error getting video info before download: {str(e)}")
+                return JsonResponse({'error': f"Error getting video info: {str(e)}"}, status=500)
+
+        # Start the download in a background thread
+        logger.info(f"Starting download thread for {download_id}")
         download_thread = threading.Thread(
-            target=_download_video,  # Use the internal function without decorators
-            args=(url, format_id, download_id, compression_level) # Pass compression_level
+            target=_download_video,
+            args=(url, format_id, download_id, compression_level, video_title, is_audio)
         )
         download_thread.daemon = True
         download_thread.start()
-        logger.info(f"Download/compression thread started for {download_id}")
-        
-        # Return initial status indicating processing has begun
+        logger.info(f"Download thread started for {download_id}")
+
         return JsonResponse({
             'download_id': download_id,
-            'video_info': video_info, # Include video info in initial response
-            'status': 'processing' # Indicate that processing (download + optional compression) is starting
+            'status': 'processing',
         })
             
     except Exception as e:
@@ -676,6 +821,7 @@ def serve_downloaded_file(request, download_id):
     response.closed = cleanup
     return response
 
+@csrf_exempt
 @require_http_methods(['POST'])
 def cancel_download(request, download_id):
     """Cancel a download."""

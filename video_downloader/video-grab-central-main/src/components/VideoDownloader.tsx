@@ -56,6 +56,7 @@ export function VideoDownloader() {
   const [error, setError] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [videoFormats, setVideoFormats] = useState<VideoFormat[]>([]);
+  const [audioFormats, setAudioFormats] = useState<VideoFormat[]>([]);
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadId, setDownloadId] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export function VideoDownloader() {
   const [downloadSize, setDownloadSize] = useState<string>('0 MB');
   const [supportedPlatforms, setSupportedPlatforms] = useState<Platform[]>([]);
   const [selectedCompressionLevel, setSelectedCompressionLevel] = useState<string>(COMPRESSION_LEVELS[0]);
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const downloadStartedRef = useRef(false);
 
   // Fetch supported platforms on component mount
@@ -105,6 +106,7 @@ export function VideoDownloader() {
     setDownloadStatus('fetching');
     setVideoInfo(null);
     setVideoFormats([]);
+    setAudioFormats([]);
     setSelectedFormat(null);
     setDownloadId(null);
     setDownloadUrl(null);
@@ -113,7 +115,8 @@ export function VideoDownloader() {
     try {
       const data = await api.getVideoInfo(inputUrl);
       setVideoInfo(data.video_info);
-      setVideoFormats(data.formats.video);
+      setVideoFormats(data.formats.video || []);
+      setAudioFormats((data.formats as any).audio || []);
       setDownloadStatus('idle');
       console.log('[Info] Video info fetched successfully');
     } catch (err) {
@@ -138,8 +141,8 @@ export function VideoDownloader() {
       setDownloadUrl(null);
       downloadStartedRef.current = false;
 
-      // Include compression_level in the API call
-      const response = await api.startDownload(url, format.format_id, selectedCompressionLevel);
+      // Include compression_level, video_title and is_audio in the API call
+      const response = await api.startDownload(url, format.format_id, selectedCompressionLevel, videoInfo?.title || '', isAudio);
       setDownloadId(response.download_id);
       // Initial status comes from the backend response now ('processing')
       setDownloadStatus(response.status as DownloadStatus);
@@ -386,6 +389,7 @@ export function VideoDownloader() {
           <VideoInfoDisplay
             videoInfo={videoInfo}
             videoFormats={videoFormats}
+            audioFormats={audioFormats}
             onFormatSelect={handleFormatSelect}
             isLoading={isLoading}
           />
